@@ -11,7 +11,8 @@ load(
 go_library(
     name = "go_default_library",
     srcs = [
-        "disk_manager.go",
+	"attacher.go",
+	"disk_manager.go",
         "doc.go",
         "iscsi.go",
         "iscsi_util.go",

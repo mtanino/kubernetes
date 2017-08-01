@@ -170,6 +170,7 @@ func (rc *reconciler) reconcile() {
 
 	// Ensure volumes that should be unmounted are unmounted.
 	for _, mountedVolume := range rc.actualStateOfWorld.GetMountedVolumes() {
+		//glog.Errorf("****************** kubelet reconcile: len(rc.actualStateOfWorld.GetMountedVolumes()): %s\n", len(rc.actualStateOfWorld.GetMountedVolumes()))
 		if !rc.desiredStateOfWorld.PodExistsInVolume(mountedVolume.PodName, mountedVolume.VolumeName) {
 			// Volume is mounted, unmount it
 			glog.V(12).Infof(mountedVolume.GenerateMsgDetailed("Starting operationExecutor.UnmountVolume", ""))
@@ -183,6 +184,11 @@ func (rc *reconciler) reconcile() {
 				glog.Errorf(mountedVolume.GenerateErrorDetailed(fmt.Sprintf("operationExecutor.UnmountVolume failed (controllerAttachDetachEnabled %v)", rc.controllerAttachDetachEnabled), err).Error())
 			}
 			if err == nil {
+				for _, test := range rc.actualStateOfWorld.GetMountedVolumes() {
+					glog.Errorf("****************** kubelet reconcile: VolumeName: %s\n", test.VolumeName)
+				}
+				glog.Errorf("****************** kubelet reconcile: len(rc.actualStateOfWorld.GetMountedVolumes()): %s\n", len(rc.actualStateOfWorld.GetMountedVolumes()))
+				glog.Errorf("****************** kubelet reconcile: mountedVolume: %s\n", mountedVolume)
 				glog.Infof(mountedVolume.GenerateMsgDetailed("operationExecutor.UnmountVolume started", ""))
 			}
 		}
@@ -209,6 +215,10 @@ func (rc *reconciler) reconcile() {
 					glog.Errorf(volumeToMount.GenerateErrorDetailed(fmt.Sprintf("operationExecutor.VerifyControllerAttachedVolume failed (controllerAttachDetachEnabled %v)", rc.controllerAttachDetachEnabled), err).Error())
 				}
 				if err == nil {
+					for _, test := range rc.actualStateOfWorld.GetMountedVolumes() {
+						glog.Errorf("****************** kubelet reconcile: VolumeName: %s\n", test.VolumeName)
+					}
+					glog.Errorf("****************** kubelet reconcile: len(rc.actualStateOfWorld.GetMountedVolumes()): %s\n", len(rc.actualStateOfWorld.GetMountedVolumes()))
 					glog.Infof(volumeToMount.GenerateMsgDetailed("operationExecutor.VerifyControllerAttachedVolume started", ""))
 				}
 			} else {
@@ -287,6 +297,7 @@ func (rc *reconciler) reconcile() {
 				// Kubelet not responsible for detaching or this volume has a non-attachable volume plugin.
 				if rc.controllerAttachDetachEnabled || !attachedVolume.PluginIsAttachable {
 					rc.actualStateOfWorld.MarkVolumeAsDetached(attachedVolume.VolumeName, attachedVolume.NodeName)
+					glog.Errorf("****************** detached/unmounted: MarkVolumeAsDetached Called\n")
 					glog.Infof(attachedVolume.GenerateMsgDetailed("Volume detached", fmt.Sprintf("DevicePath %q", attachedVolume.DevicePath)))
 				} else {
 					// Only detach if kubelet detach is enabled

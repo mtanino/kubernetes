@@ -277,6 +277,7 @@ func (og *operationGenerator) GenerateAttachVolumeFunc(
 		// Update actual state of world
 		addVolumeNodeErr := actualStateOfWorld.MarkVolumeAsAttached(
 			v1.UniqueVolumeName(""), volumeToAttach.VolumeSpec, volumeToAttach.NodeName, devicePath)
+		glog.Errorf("****************** GenerateAttachVolumeFunc: MarkVolumeAsAttached Called\n")
 		if addVolumeNodeErr != nil {
 			// On failure, return error. Caller will log and retry.
 			return volumeToAttach.GenerateErrorDetailed("AttachVolume.MarkVolumeAsAttached failed", addVolumeNodeErr)
@@ -350,7 +351,8 @@ func (og *operationGenerator) GenerateDetachVolumeFunc(
 		// Update actual state of world
 		actualStateOfWorld.MarkVolumeAsDetached(
 			volumeToDetach.VolumeName, volumeToDetach.NodeName)
-
+		glog.Errorf("****************** GenerateDetachVolumeFunc: MarkVolumeAsDetached: %s\n", volumeToDetach.VolumeName)
+		glog.Errorf("****************** GenerateDetachVolumeFunc: MarkVolumeAsDetached Called\n")
 		return nil
 	}, nil
 }
@@ -408,7 +410,7 @@ func (og *operationGenerator) GenerateMountVolumeFunc(
 			glog.Infof(volumeToMount.GenerateMsgDetailed("MountVolume.WaitForAttach entering", fmt.Sprintf("DevicePath %q", volumeToMount.DevicePath)))
 
 			devicePath, err := volumeAttacher.WaitForAttach(
-				volumeToMount.VolumeSpec, volumeToMount.DevicePath, waitForAttachTimeout)
+				volumeToMount.VolumeSpec, volumeToMount.DevicePath, volumeToMount.Pod, waitForAttachTimeout)
 			if err != nil {
 				// On failure, return error. Caller will log and retry.
 				return volumeToMount.GenerateErrorDetailed("MountVolume.WaitForAttach failed", err)
@@ -562,6 +564,7 @@ func (og *operationGenerator) GenerateUnmountDeviceFunc(
 	return func() error {
 		deviceMountPath, err :=
 			volumeAttacher.GetDeviceMountPath(deviceToDetach.VolumeSpec)
+		glog.Errorf("*********************** GenerateUnmountDeviceFunc: deviceMountPath: %s", deviceMountPath)
 		if err != nil {
 			// On failure, return error. Caller will log and retry.
 			return deviceToDetach.GenerateErrorDetailed("GetDeviceMountPath failed", err)
@@ -631,6 +634,8 @@ func (og *operationGenerator) GenerateVerifyControllerAttachedVolumeFunc(
 
 			addVolumeNodeErr := actualStateOfWorld.MarkVolumeAsAttached(
 				volumeToMount.VolumeName, volumeToMount.VolumeSpec, nodeName, "" /* devicePath */)
+			glog.Errorf("****************** GenerateVerifyControllerAttachedVolumeFunc: volumename:%\n", volumeToMount.VolumeName)
+			glog.Errorf("****************** GenerateVerifyControllerAttachedVolumeFunc: PluginIs not Attachable: MarkVolumeAsAttached Called\n")
 			if addVolumeNodeErr != nil {
 				// On failure, return error. Caller will log and retry.
 				return volumeToMount.GenerateErrorDetailed("VerifyControllerAttachedVolume.MarkVolumeAsAttachedByUniqueVolumeName failed", addVolumeNodeErr)
@@ -667,6 +672,7 @@ func (og *operationGenerator) GenerateVerifyControllerAttachedVolumeFunc(
 			if attachedVolume.Name == volumeToMount.VolumeName {
 				addVolumeNodeErr := actualStateOfWorld.MarkVolumeAsAttached(
 					v1.UniqueVolumeName(""), volumeToMount.VolumeSpec, nodeName, attachedVolume.DevicePath)
+				glog.Errorf("****************** GenerateVerifyControllerAttachedVolumeFunc: PluginIsAttachable: MarkVolumeAsAttached Called\n")
 				glog.Infof(volumeToMount.GenerateMsgDetailed("Controller attach succeeded", fmt.Sprintf("device path: %q", attachedVolume.DevicePath)))
 				if addVolumeNodeErr != nil {
 					// On failure, return error. Caller will log and retry.

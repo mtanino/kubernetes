@@ -333,6 +333,7 @@ func (asw *actualStateOfWorld) addVolume(
 	asw.Lock()
 	defer asw.Unlock()
 
+	glog.Errorf("****************** asw volumeName: %s\n", volumeName)
 	volumePlugin, err := asw.volumePluginMgr.FindPluginBySpec(volumeSpec)
 	if err != nil || volumePlugin == nil {
 		return fmt.Errorf(
@@ -359,6 +360,8 @@ func (asw *actualStateOfWorld) addVolume(
 
 	volumeObj, volumeExists := asw.attachedVolumes[volumeName]
 	if !volumeExists {
+		glog.Errorf("****************** asw addVolume: len(asw.attachedVolume): '%d'\n", len(asw.attachedVolumes))
+		glog.Errorf("****************** asw addVolume: volumeName: '%s' doesn't exist\n", volumeName)
 		volumeObj = attachedVolume{
 			volumeName:         volumeName,
 			spec:               volumeSpec,
@@ -371,10 +374,15 @@ func (asw *actualStateOfWorld) addVolume(
 	} else {
 		// If volume object already exists, update the fields such as device path
 		volumeObj.devicePath = devicePath
+		glog.Infof("***************** Volume %q is already added to attachedVolume list, update device path %q",
+			volumeName,
+			devicePath)
 		glog.V(2).Infof("Volume %q is already added to attachedVolume list, update device path %q",
 			volumeName,
 			devicePath)
 	}
+	glog.Errorf("****************** asw addVolume: v2 len(asw.attachedVolume): '%d'\n", len(asw.attachedVolumes))
+	glog.Errorf("****************** asw addVolume: volumeObj: %s\n", volumeObj)
 	asw.attachedVolumes[volumeName] = volumeObj
 
 	return nil
@@ -535,7 +543,9 @@ func (asw *actualStateOfWorld) GetMountedVolumes() []MountedVolume {
 	asw.RLock()
 	defer asw.RUnlock()
 	mountedVolume := make([]MountedVolume, 0 /* len */, len(asw.attachedVolumes) /* cap */)
+	//glog.Errorf("****************** ASW: GetMountedVolumes: len(asw.attachedVolumes): %d", len(asw.attachedVolumes))
 	for _, volumeObj := range asw.attachedVolumes {
+		//glog.Errorf("****************** ASW: GetMountedVolumes: volumeObj: %v", volumeObj)
 		for _, podObj := range volumeObj.mountedPods {
 			mountedVolume = append(
 				mountedVolume,

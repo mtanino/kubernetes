@@ -28,7 +28,7 @@ import (
 type diskManager interface {
 	MakeGlobalPDName(disk iscsiDisk) string
 	// Attaches the disk to the kubelet's host machine.
-	AttachDisk(b iscsiDiskMounter) error
+	AttachDisk(b iscsiDiskMounter) (string, error)
 	// Detaches the disk from the kubelet's host machine.
 	DetachDisk(disk iscsiDiskUnmounter, mntPath string) error
 }
@@ -45,10 +45,6 @@ func diskSetUp(manager diskManager, b iscsiDiskMounter, volPath string, mounter 
 	}
 	if !notMnt {
 		return nil
-	}
-	if err := manager.AttachDisk(b); err != nil {
-		glog.Errorf("failed to attach disk")
-		return err
 	}
 
 	if err := os.MkdirAll(volPath, 0750); err != nil {
@@ -77,6 +73,7 @@ func diskSetUp(manager diskManager, b iscsiDiskMounter, volPath string, mounter 
 // utility to tear down a disk based filesystem
 func diskTearDown(manager diskManager, c iscsiDiskUnmounter, volPath string, mounter mount.Interface) error {
 	notMnt, err := mounter.IsLikelyNotMountPoint(volPath)
+	glog.Errorf("****************** iscsi: diskTearDown: notMnt %s", notMnt)
 	if err != nil {
 		glog.Errorf("cannot validate mountpoint %s", volPath)
 		return err
@@ -85,7 +82,7 @@ func diskTearDown(manager diskManager, c iscsiDiskUnmounter, volPath string, mou
 		return os.Remove(volPath)
 	}
 
-	refs, err := mount.GetMountRefs(mounter, volPath)
+	_, err = mount.GetMountRefs(mounter, volPath)
 	if err != nil {
 		glog.Errorf("failed to get reference count %s", volPath)
 		return err
@@ -94,16 +91,7 @@ func diskTearDown(manager diskManager, c iscsiDiskUnmounter, volPath string, mou
 		glog.Errorf("failed to unmount %s", volPath)
 		return err
 	}
-	// If len(refs) is 1, then all bind mounts have been removed, and the
-	// remaining reference is the global mount. It is safe to detach.
-	if len(refs) == 1 {
-		mntPath := refs[0]
-		if err := manager.DetachDisk(c, mntPath); err != nil {
-			glog.Errorf("failed to detach disk from %s", mntPath)
-			return err
-		}
-	}
-
+	glog.Errorf("****************** iscsi: diskTearDown: volPath %s", volPath)
 	notMnt, mntErr := mounter.IsLikelyNotMountPoint(volPath)
 	if mntErr != nil {
 		glog.Errorf("IsLikelyNotMountPoint check failed: %v", mntErr)
@@ -114,6 +102,6 @@ func diskTearDown(manager diskManager, c iscsiDiskUnmounter, volPath string, mou
 			return err
 		}
 	}
+	glog.Errorf("****************** iscsi: diskTearDown: succeed")
 	return nil
-
 }
