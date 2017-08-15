@@ -135,7 +135,7 @@ func NewOperationExecutor(
 // state of the world cache after successful mount/unmount.
 type ActualStateOfWorldMounterUpdater interface {
 	// Marks the specified volume as mounted to the specified pod
-	MarkVolumeAsMounted(podName volumetypes.UniquePodName, podUID types.UID, volumeName v1.UniqueVolumeName, mounter volume.Mounter, outerVolumeSpecName string, volumeGidValue string) error
+	MarkVolumeAsMounted(podName volumetypes.UniquePodName, podUID types.UID, volumeName v1.UniqueVolumeName, mounter volume.Mounter, blockVolumeMapper volume.BlockVolumeMapper, outerVolumeSpecName string, volumeGidValue string) error
 
 	// Marks the specified volume as unmounted from the specified pod
 	MarkVolumeAsUnmounted(podName volumetypes.UniquePodName, volumeName v1.UniqueVolumeName) error
@@ -145,6 +145,9 @@ type ActualStateOfWorldMounterUpdater interface {
 
 	// Marks the specified volume as having its global mount unmounted.
 	MarkDeviceAsUnmounted(volumeName v1.UniqueVolumeName) error
+
+	// Marks the specified volume as having its global mount unmounted.
+	SetVolumeDevicePath(volumeName v1.UniqueVolumeName, devicePath string) error
 }
 
 // ActualStateOfWorldAttacherUpdater defines a set of operations updating the
@@ -490,6 +493,9 @@ type MountedVolume struct {
 	// Mounter is the volume mounter used to mount this volume. It is required
 	// by kubelet to create container.VolumeMap.
 	Mounter volume.Mounter
+
+	//
+	BlockVolumeMapper volume.BlockVolumeMapper
 
 	// VolumeGidValue contains the value of the GID annotation, if present.
 	VolumeGidValue string

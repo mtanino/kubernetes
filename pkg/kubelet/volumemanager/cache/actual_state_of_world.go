@@ -58,7 +58,7 @@ type ActualStateOfWorld interface {
 	// volume, reset the pod's remountRequired value.
 	// If a volume with the name volumeName does not exist in the list of
 	// attached volumes, an error is returned.
-	AddPodToVolume(podName volumetypes.UniquePodName, podUID types.UID, volumeName v1.UniqueVolumeName, mounter volume.Mounter, outerVolumeSpecName string, volumeGidValue string) error
+	AddPodToVolume(podName volumetypes.UniquePodName, podUID types.UID, volumeName v1.UniqueVolumeName, mounter volume.Mounter, blockVolumeMapper volume.BlockVolumeMapper, outerVolumeSpecName string, volumeGidValue string) error
 
 	// MarkRemountRequired marks each volume that is successfully attached and
 	// mounted for the specified pod as requiring remount (if the plugin for the
@@ -254,6 +254,9 @@ type mountedPod struct {
 	// mounter used to mount
 	mounter volume.Mounter
 
+	// mounter used to mount
+	blockVolumeMapper volume.BlockVolumeMapper
+
 	// outerVolumeSpecName is the volume.Spec.Name() of the volume as referenced
 	// directly in the pod. If the volume was referenced through a persistent
 	// volume claim, this contains the volume.Spec.Name() of the persistent
@@ -287,6 +290,7 @@ func (asw *actualStateOfWorld) MarkVolumeAsMounted(
 	podUID types.UID,
 	volumeName v1.UniqueVolumeName,
 	mounter volume.Mounter,
+	blockVolumeMapper volume.BlockVolumeMapper,
 	outerVolumeSpecName string,
 	volumeGidValue string) error {
 	return asw.AddPodToVolume(
@@ -294,6 +298,7 @@ func (asw *actualStateOfWorld) MarkVolumeAsMounted(
 		podUID,
 		volumeName,
 		mounter,
+		blockVolumeMapper,
 		outerVolumeSpecName,
 		volumeGidValue)
 }
@@ -385,6 +390,7 @@ func (asw *actualStateOfWorld) AddPodToVolume(
 	podUID types.UID,
 	volumeName v1.UniqueVolumeName,
 	mounter volume.Mounter,
+	blockVolumeMapper volume.BlockVolumeMapper,
 	outerVolumeSpecName string,
 	volumeGidValue string) error {
 	asw.Lock()
@@ -403,6 +409,7 @@ func (asw *actualStateOfWorld) AddPodToVolume(
 			podName:             podName,
 			podUID:              podUID,
 			mounter:             mounter,
+			blockVolumeMapper:   blockVolumeMapper,
 			outerVolumeSpecName: outerVolumeSpecName,
 			volumeGidValue:      volumeGidValue,
 		}
@@ -460,6 +467,26 @@ func (asw *actualStateOfWorld) SetVolumeGloballyMounted(
 
 	volumeObj.globallyMounted = globallyMounted
 	asw.attachedVolumes[volumeName] = volumeObj
+	return nil
+}
+
+func (asw *actualStateOfWorld) SetVolumeDevicePath(
+	volumeName v1.UniqueVolumeName, devicePath string) error {
+	asw.Lock()
+	defer asw.Unlock()
+
+	volumeObj, volumeExists := asw.attachedVolumes[volumeName]
+	if !volumeExists {
+		return fmt.Errorf(
+			"no volume with the name %q exists in the list of attached volumes",
+			volumeName)
+	}
+	if volumeObj.devicePath == "" {
+		volumeObj.devicePath = devicePath
+		asw.attachedVolumes[volumeName] = volumeObj
+		glog.Errorf("#### DEBUG LOG ####: volumeObj.devicePath: %s", volumeObj.devicePath)
+		glog.Errorf("#### DEBUG LOG ####: asw.attachedVolumes[volumeName]: %v", asw.attachedVolumes[volumeName])
+	}
 	return nil
 }
 
@@ -682,5 +709,6 @@ func getMountedVolume(
 			PluginName:          attachedVolume.pluginName,
 			PodUID:              mountedPod.podUID,
 			Mounter:             mountedPod.mounter,
+			BlockVolumeMapper:   mountedPod.blockVolumeMapper,
 			VolumeGidValue:      mountedPod.volumeGidValue}}
 }

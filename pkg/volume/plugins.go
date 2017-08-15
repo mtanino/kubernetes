@@ -186,6 +186,14 @@ type AttachableVolumePlugin interface {
 	GetDeviceMountRefs(deviceMountPath string) ([]string, error)
 }
 
+type BlockVolumePlugin interface {
+	VolumePlugin
+	//
+	NewBlockVolumeMapper(spec *Spec, podRef *v1.Pod, devicePath string, opts VolumeOptions) (BlockVolumeMapper, error)
+	//
+	NewBlockVolumeUnmapper(name string, podUID types.UID) (BlockVolumeUnmapper, error)
+}
+
 // VolumeHost is an interface that plugins can use to access the kubelet.
 type VolumeHost interface {
 	// GetPluginDir returns the absolute path to a directory under which
@@ -549,6 +557,30 @@ func (pm *VolumePluginMgr) FindAttachablePluginByName(name string) (AttachableVo
 	}
 	if attachablePlugin, ok := volumePlugin.(AttachableVolumePlugin); ok {
 		return attachablePlugin, nil
+	}
+	return nil, nil
+}
+
+//
+func (pm *VolumePluginMgr) FindBlockVolumeMapperPluginBySpec(spec *Spec) (BlockVolumePlugin, error) {
+	volumePlugin, err := pm.FindPluginBySpec(spec)
+	if err != nil {
+		return nil, err
+	}
+	if blockVolumePlugin, ok := volumePlugin.(BlockVolumePlugin); ok {
+		return blockVolumePlugin, nil
+	}
+	return nil, nil
+}
+
+//
+func (pm *VolumePluginMgr) FindBlockVolumeMapperByName(name string) (BlockVolumePlugin, error) {
+	volumePlugin, err := pm.FindPluginByName(name)
+	if err != nil {
+		return nil, err
+	}
+	if blockVolumePlugin, ok := volumePlugin.(BlockVolumePlugin); ok {
+		return blockVolumePlugin, nil
 	}
 	return nil, nil
 }

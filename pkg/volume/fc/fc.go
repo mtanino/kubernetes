@@ -142,7 +142,57 @@ func (plugin *fcPlugin) newMounterInternal(spec *volume.Spec, podUID types.UID, 
 	}, nil
 }
 
+func (plugin *fcPlugin) NewBlockVolumeMapper(spec *volume.Spec, pod *v1.Pod, devicePath string, _ volume.VolumeOptions) (volume.BlockVolumeMapper, error) {
+	// Inject real implementations here, test through the internal function.
+	return plugin.newBlockVolumeMapperInternal(spec, pod, devicePath, &FCUtil{}, plugin.host.GetMounter(plugin.GetPluginName()), plugin.host.GetExec(plugin.GetPluginName()))
+}
+
+func (plugin *fcPlugin) newBlockVolumeMapperInternal(spec *volume.Spec, pod *v1.Pod, devicePath string, manager diskManager, mounter mount.Interface, exec mount.Exec) (volume.BlockVolumeMapper, error) {
+	// fc volumes used directly in a pod have a ReadOnly flag set by the pod author.
+	// fc volumes used as a PersistentVolume gets the ReadOnly flag indirectly through the persistent-claim volume used to mount the PV
+	fc, readOnly, err := getVolumeSource(spec)
+	if err != nil {
+		return nil, err
+	}
+
+	var lun string
+	var wwids []string
+	if fc.Lun != nil && len(fc.TargetWWNs) != 0 {
+		lun = strconv.Itoa(int(*fc.Lun))
+	} else if len(fc.WWIDs) != 0 {
+		for _, wwid := range fc.WWIDs {
+			wwids = append(wwids, strings.Replace(wwid, " ", "_", -1))
+		}
+	} else {
+		return nil, fmt.Errorf("fc: no fc disk information found. failed to make a new mounter")
+	}
+
+	volumeType, err := util.GetVolumeTypeForVolume(pod, plugin.host.GetKubeClient(), spec.PersistentVolume)
+	glog.Infof("#### DEBUG LOG ####: newBlockVolumeMapperInternal GetVolumeTypeForVolume FC: %s", volumeType)
+	glog.Infof("#### DEBUG LOG ####: newBlockVolumeMapperInternal devicePath: %s", devicePath)
+
+	return &fcDiskMapper{
+		fcDisk: &fcDisk{
+			podUID:  pod.UID,
+			volName: spec.Name(),
+			wwns:    fc.TargetWWNs,
+			lun:     lun,
+			wwids:   wwids,
+			manager: manager,
+			io:      &osIOHandler{},
+			plugin:  plugin},
+		volumeType: volumeType,
+		volumePath: devicePath,
+		readOnly:   readOnly,
+	}, nil
+}
+
 func (plugin *fcPlugin) NewUnmounter(volName string, podUID types.UID) (volume.Unmounter, error) {
+	// Inject real implementations here, test through the internal function.
+	return plugin.newUnmounterInternal(volName, podUID, &FCUtil{}, plugin.host.GetMounter(plugin.GetPluginName()))
+}
+
+func (plugin *fcPlugin) NewBlockVolumeUnmapper(volName string, podUID types.UID) (volume.BlockVolumeUnmapper, error) {
 	// Inject real implementations here, test through the internal function.
 	return plugin.newUnmounterInternal(volName, podUID, &FCUtil{}, plugin.host.GetMounter(plugin.GetPluginName()))
 }
@@ -198,9 +248,11 @@ func (fc *fcDisk) GetPath() string {
 
 type fcDiskMounter struct {
 	*fcDisk
-	readOnly bool
-	fsType   string
-	mounter  *mount.SafeFormatAndMount
+	readOnly   bool
+	volumeType v1.PersistentVolumeType
+	volumePath string
+	fsType     string
+	mounter    *mount.SafeFormatAndMount
 }
 
 var _ volume.Mounter = &fcDiskMounter{}
@@ -254,6 +306,65 @@ func (c *fcDiskUnmounter) TearDownAt(dir string) error {
 		return nil
 	}
 	return diskTearDown(c.manager, *c, dir, c.mounter)
+}
+
+// Block Volumes Support
+type fcDiskMapper struct {
+	*fcDisk
+	readOnly   bool
+	volumeType v1.PersistentVolumeType
+	volumePath string
+}
+
+var _ volume.BlockVolumeMapper = &fcDiskMapper{}
+
+func (b *fcDiskMapper) CanBlockMapping() error {
+	return nil
+}
+
+func (b *fcDiskMapper) SetUp() error {
+	return nil
+}
+
+func (b *fcDiskMapper) SetUpAt(dir string) error {
+	return nil
+}
+
+func (b *fcDiskMapper) GetVolumePath() string {
+	devicePath := ""
+	mounter := fcDiskMounter{
+		fcDisk: &fcDisk{
+			wwns:  b.wwns,
+			lun:   b.lun,
+			wwids: b.wwids,
+			io:    b.io,
+		},
+	}
+	disk, dm := searchDisk(mounter)
+	if dm != "" {
+		devicePath = dm
+	} else {
+		devicePath = disk
+	}
+	return devicePath
+}
+
+func (b *fcDiskMapper) GetVolumeType() v1.PersistentVolumeType {
+	return b.volumeType
+}
+
+type fcDiskUnmapper struct {
+	*fcDisk
+}
+
+var _ volume.BlockVolumeUnmapper = &fcDiskUnmapper{}
+
+func (c *fcDiskUnmapper) TearDown() error {
+	return nil
+}
+
+func (c *fcDiskUnmapper) TearDownAt(dir string) error {
+	return nil
 }
 
 func getVolumeSource(spec *volume.Spec) (*v1.FCVolumeSource, bool, error) {

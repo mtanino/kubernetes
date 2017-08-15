@@ -444,3 +444,19 @@ func StorageNodeAffinityToAlphaAnnotation(annotations map[string]string, affinit
 	annotations[v1.AlphaStorageNodeAffinityAnnotation] = string(json)
 	return nil
 }
+
+// GetPersistentVolumeType returns volumeType.
+func GetPersistentVolumeType(volume *v1.PersistentVolume) (v1.PersistentVolumeType, error) {
+	if volume.Spec.VolumeType != nil {
+		return *volume.Spec.VolumeType, nil
+	}
+	return "", fmt.Errorf("volumeType in the PersistentVolume is nil")
+}
+
+// GetPersistentVolumeClaimVolumeType returns volumeType.
+func GetPersistentVolumeClaimVolumeType(claim *v1.PersistentVolumeClaim) (v1.PersistentVolumeType, error) {
+	if claim.Spec.VolumeType != nil {
+		return *claim.Spec.VolumeType, nil
+	}
+	return "", fmt.Errorf("volumeType in PersistentVolumeClaim is nil")
+}

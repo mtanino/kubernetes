@@ -28,6 +28,7 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
+	v1helper "k8s.io/kubernetes/pkg/api/v1/helper"
 	"k8s.io/kubernetes/pkg/features"
 	kevents "k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/pkg/util/mount"
@@ -382,6 +383,37 @@ func (og *operationGenerator) GenerateMountVolumeFunc(
 		return nil, detailedErr
 	}
 
+	var blockVolumeMapper volume.BlockVolumeMapper
+	pv := volumeToMount.VolumeSpec.PersistentVolume
+	if pv != nil {
+		claimName := pv.Spec.ClaimRef.Name
+		pvc, _ := og.kubeClient.Core().PersistentVolumeClaims(volumeToMount.Pod.ObjectMeta.Namespace).Get(claimName, metav1.GetOptions{})
+		pvcVolumeType, _ := v1helper.GetPersistentVolumeClaimVolumeType(pvc)
+		glog.Infof("#### DEBUG LOG ####: GetVolumeTypeForVolume: PVC VolumeType  %s", pvcVolumeType)
+
+		if pvcVolumeType == v1.PersistentVolumeBlock {
+			// Get block volume mounter plugin
+			blockVolumePlugin, err :=
+				og.volumePluginMgr.FindBlockVolumeMapperPluginBySpec(volumeToMount.VolumeSpec)
+			if err != nil {
+				return nil, volumeToMount.GenerateErrorDetailed("MountVolume.FindPluginBySpec failed", err)
+			}
+
+			if blockVolumePlugin != nil {
+				blockVolumeMapper, newMounterErr = blockVolumePlugin.NewBlockVolumeMapper(
+					volumeToMount.VolumeSpec,
+					volumeToMount.Pod,
+					volumeToMount.DevicePath,
+					volume.VolumeOptions{})
+				if newMounterErr != nil {
+					eventErr, detailedErr := volumeToMount.GenerateError("MountVolume.NewBlockVolumeMapper initialization failed", newMounterErr)
+					og.recorder.Eventf(volumeToMount.Pod, v1.EventTypeWarning, kevents.FailedMountVolume, eventErr.Error())
+					return nil, detailedErr
+				}
+			}
+		}
+	}
+
 	mountCheckError := checkMountOptionSupport(og, volumeToMount, volumePlugin)
 
 	if mountCheckError != nil {
@@ -412,6 +444,14 @@ func (og *operationGenerator) GenerateMountVolumeFunc(
 			if err != nil {
 				// On failure, return error. Caller will log and retry.
 				return volumeToMount.GenerateErrorDetailed("MountVolume.WaitForAttach failed", err)
+			}
+
+			// Update actual state of world to reflect confirmed devicePath
+			setVolumeDevicePathErr := actualStateOfWorld.SetVolumeDevicePath(
+				volumeToMount.VolumeName, devicePath)
+			if setVolumeDevicePathErr != nil {
+				// On failure, return error. Caller will log and retry.
+				return volumeToMount.GenerateErrorDetailed("MountVolume.SetVolumeDevicePath failed", setVolumeDevicePathErr)
 			}
 
 			glog.Infof(volumeToMount.GenerateMsgDetailed("MountVolume.WaitForAttach succeeded", ""))
@@ -481,6 +521,7 @@ func (og *operationGenerator) GenerateMountVolumeFunc(
 			volumeToMount.Pod.UID,
 			volumeToMount.VolumeName,
 			volumeMounter,
+			blockVolumeMapper,
 			volumeToMount.OuterVolumeSpecName,
 			volumeToMount.VolumeGidValue)
 		if markVolMountedErr != nil {

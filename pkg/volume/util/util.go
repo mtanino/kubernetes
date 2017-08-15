@@ -235,3 +235,38 @@ func LoadPodFromFile(filePath string) (*v1.Pod, error) {
 	}
 	return pod, nil
 }
+
+func GetVolumeTypeForVolume(pod *v1.Pod, kubeClient clientset.Interface, pv *v1.PersistentVolume) (v1.PersistentVolumeType, error) {
+	if kubeClient == nil {
+		return "", fmt.Errorf("Cannot get kube client")
+	}
+
+	if pv == nil || pv.Spec.ClaimRef == nil {
+		return "", fmt.Errorf("Cannot get PV and PVC")
+	}
+
+	pvVolumeType, err := v1helper.GetPersistentVolumeType(pv)
+	if err != nil {
+		return "", err
+	}
+	glog.Infof("#### DEBUG LOG ####: GetVolumeTypeForVolume: PV VolumeType %s", pvVolumeType)
+
+	claimName := pv.Spec.ClaimRef.Name
+	pvc, _ := kubeClient.Core().PersistentVolumeClaims(pod.Namespace).Get(claimName, metav1.GetOptions{})
+	pvcVolumeType, err := v1helper.GetPersistentVolumeClaimVolumeType(pvc)
+	if err != nil {
+		return "", err
+	}
+	glog.Infof("#### DEBUG LOG ####: GetVolumeTypeForVolume: PVC VolumeType  %s", pvcVolumeType)
+
+	if pvVolumeType == v1.PersistentVolumeFile && pvcVolumeType == v1.PersistentVolumeFile {
+		return v1.PersistentVolumeFile, nil
+	} else if pvVolumeType == v1.PersistentVolumeFile && pvcVolumeType == v1.PersistentVolumeBlock {
+		return "", fmt.Errorf("Unexpected volumeType combination")
+	} else if pvVolumeType == v1.PersistentVolumeBlock && pvcVolumeType == v1.PersistentVolumeFile {
+		return v1.PersistentVolumeFile, nil
+	} else if pvVolumeType == v1.PersistentVolumeBlock && pvcVolumeType == v1.PersistentVolumeBlock {
+		return v1.PersistentVolumeBlock, nil
+	}
+	return "", fmt.Errorf("Unexpected volumeType combination")
+}

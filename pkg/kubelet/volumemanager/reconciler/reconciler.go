@@ -345,6 +345,7 @@ type reconstructedVolume struct {
 	devicePath          string
 	reportedInUse       bool
 	mounter             volumepkg.Mounter
+	blockVolumeMapper   volumepkg.BlockVolumeMapper
 }
 
 // reconstructFromDisk scans the volume directories under the given pod directory. If the volume is not
@@ -519,6 +520,7 @@ func (rc *reconciler) updateStates(volumesNeedUpdate map[v1.UniqueVolumeName]*re
 			types.UID(volume.podName),
 			volume.volumeName,
 			volume.mounter,
+			volume.blockVolumeMapper,
 			volume.outerVolumeSpecName,
 			volume.volumeGidValue)
 		if err != nil {

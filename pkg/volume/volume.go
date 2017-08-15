@@ -132,6 +132,30 @@ type Unmounter interface {
 	TearDownAt(dir string) error
 }
 
+//
+type BlockVolumeMapper interface {
+	Volume
+	//
+	CanBlockMapping() error
+	//
+	SetUp() error
+	//
+	SetUpAt(dir string) error
+	//
+	GetVolumePath() string
+	//
+	GetVolumeType() v1.PersistentVolumeType
+}
+
+//
+type BlockVolumeUnmapper interface {
+	Volume
+	//
+	TearDown() error
+	//
+	TearDownAt(dir string) error
+}
+
 // Provisioner is an interface that creates templates for PersistentVolumes
 // and can create the volume as a new resource in the infrastructure provider.
 type Provisioner interface {
