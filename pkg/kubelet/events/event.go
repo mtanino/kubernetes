@@ -46,6 +46,8 @@ const (
 	FailedDetachVolume                   = "FailedDetachVolume"
 	FailedMountVolume                    = "FailedMount"
 	FailedUnMountVolume                  = "FailedUnMount"
+	FailedMapVolume                      = "FailedMap"
+	FailedUnmapVolume                    = "FailedUnmap"
 	SuccessfulDetachVolume               = "SuccessfulDetachVolume"
 	SuccessfulMountVolume                = "SuccessfulMountVolume"
 	SuccessfulUnMountVolume              = "SuccessfulUnMountVolume"

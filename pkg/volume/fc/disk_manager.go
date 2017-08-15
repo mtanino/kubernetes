@@ -95,5 +95,37 @@ func diskTearDown(manager diskManager, c fcDiskUnmounter, volPath string, mounte
 		}
 	}
 	return nil
+}
+
+// utility to map a device to symbolic link
+func deviceSetUp(manager diskManager, b fcDiskMapper, volPath string) error {
+	globalPDPath := manager.MakeGlobalPDName(*b.fcDisk)
+	//if filepath.IsAbs(globalPDPath) || filepath.IsAbs(volPath) {
+	//	return fmt.Errorf("cannot validate mountpoint: globalPDPath: %s, volPath: %s", globalPDPath, volPath)
+	//}
+	devicePath, err := os.Readlink(globalPDPath)
+	if err != nil {
+		glog.Errorf("failed to readlink: %s", globalPDPath)
+		return err
+	}
+	if err := os.Symlink(devicePath, volPath); err != nil && !os.IsExist(err) {
+		return err
+	}
+	return nil
+}
+
+// utility to tear down a device
+func deviceTearDown(manager diskManager, c fcDiskUnmapper, volPath string) error {
+	fi, err := os.Lstat(volPath)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&os.ModeSymlink == os.ModeSymlink {
+		err := os.Remove(volPath)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 
 }

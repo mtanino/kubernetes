@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume"
@@ -181,6 +182,9 @@ func volumeSpecToMounter(spec *volume.Spec, host volume.VolumeHost) (*fcDiskMoun
 		return nil, fmt.Errorf("fc: no fc disk information found. failed to make a new mounter")
 	}
 
+	// volumeType, err := util.GetVolumeModeForVolume(pod, plugin.host.GetKubeClient(), spec.PersistentVolume)
+	// glog.Infof("#### DEBUG LOG ####: newBlockVolumeMapperInternal GetVolumeTypeForVolume FC: %s", volumeType)
+
 	return &fcDiskMounter{
 		fcDisk: &fcDisk{
 			plugin: &fcPlugin{
@@ -191,9 +195,10 @@ func volumeSpecToMounter(spec *volume.Spec, host volume.VolumeHost) (*fcDiskMoun
 			wwids: wwids,
 			io:    &osIOHandler{},
 		},
-		fsType:   fc.FSType,
-		readOnly: readOnly,
-		mounter:  volumehelper.NewSafeFormatAndMountFromHost(fcPluginName, host),
+		fsType:     fc.FSType,
+		volumeType: v1.PersistentVolumeBlock,
+		readOnly:   readOnly,
+		mounter:    volumehelper.NewSafeFormatAndMountFromHost(fcPluginName, host),
 	}, nil
 }
 

@@ -18,6 +18,7 @@ package operationexecutor
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/golang/glog"
@@ -28,6 +29,7 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
+	v1helper "k8s.io/kubernetes/pkg/api/v1/helper"
 	"k8s.io/kubernetes/pkg/features"
 	kevents "k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/pkg/util/mount"
@@ -92,6 +94,15 @@ type OperationGenerator interface {
 
 	// Generates the function needed to check if the attach_detach controller has attached the volume plugin
 	GenerateVerifyControllerAttachedVolumeFunc(volumeToMount VolumeToMount, nodeName types.NodeName, actualStateOfWorld ActualStateOfWorldAttacherUpdater) (func() error, error)
+
+	// Generates the MapVolume function needed to perform the map of a volume plugin
+	GenerateMapVolumeFunc(waitForAttachTimeout time.Duration, volumeToMount VolumeToMount, actualStateOfWorldMounterUpdater ActualStateOfWorldMounterUpdater) (func() error, error)
+
+	// Generates the UnmapVolume function needed to perform the unmap of a volume plugin
+	GenerateUnmapVolumeFunc(volumeToUnmount MountedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater) (func() error, error)
+
+	// Generates the UnmapDevice function needed to perform the unmap of a device
+	GenerateUnmapDeviceFunc(deviceToDetach AttachedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater, mounter mount.Interface) (func() error, error)
 
 	// GetVolumePluginMgr returns volume plugin manager
 	GetVolumePluginMgr() *volume.VolumePluginMgr
@@ -481,6 +492,7 @@ func (og *operationGenerator) GenerateMountVolumeFunc(
 			volumeToMount.Pod.UID,
 			volumeToMount.VolumeName,
 			volumeMounter,
+			nil,
 			volumeToMount.OuterVolumeSpecName,
 			volumeToMount.VolumeGidValue)
 		if markVolMountedErr != nil {
@@ -619,6 +631,225 @@ func (og *operationGenerator) GenerateUnmountDeviceFunc(
 	}, nil
 }
 
+func (og *operationGenerator) GenerateMapVolumeFunc(
+	waitForAttachTimeout time.Duration,
+	volumeToMount VolumeToMount,
+	actualStateOfWorld ActualStateOfWorldMounterUpdater) (func() error, error) {
+
+	var blockVolumeMapper volume.BlockVolumeMapper
+	pv := volumeToMount.VolumeSpec.PersistentVolume
+	if pv == nil {
+		return nil, volumeToMount.GenerateErrorDetailed("MapVolume. Find PersistentVolume failed. PersistentVolume is nil.", nil)
+	}
+	claimName := pv.Spec.ClaimRef.Name
+	pvc, _ := og.kubeClient.Core().PersistentVolumeClaims(volumeToMount.Pod.ObjectMeta.Namespace).Get(claimName, metav1.GetOptions{})
+	pvcVolumeType, _ := v1helper.GetPersistentVolumeClaimVolumeType(pvc)
+	glog.Infof("#### DEBUG LOG ####: GetVolumeTypeForVolume: PVC VolumeType  %s", pvcVolumeType)
+
+	if pvcVolumeType != v1.PersistentVolumeBlock {
+		return nil, volumeToMount.GenerateErrorDetailed("Invalid MapVolume call. The volumeMode of PersistentVolume isn't 'Block'.", nil)
+	}
+	// Get block volume mapper plugin
+	blockVolumePlugin, err :=
+		og.volumePluginMgr.FindBlockVolumeMapperPluginBySpec(volumeToMount.VolumeSpec)
+	if err != nil {
+		return nil, volumeToMount.GenerateErrorDetailed("MapVolume.FindPluginBySpec failed", err)
+	}
+	if blockVolumePlugin == nil {
+		return nil, volumeToMount.GenerateErrorDetailed("MapVolume.FindPluginBySpec failed to find BlockVolumeMapper plugin. Volume plugin is nil.", nil)
+	}
+	affinityErr := checkNodeAffinity(og, volumeToMount, blockVolumePlugin)
+	if affinityErr != nil {
+		return nil, affinityErr
+	}
+	blockVolumeMapper, newMapperErr := blockVolumePlugin.NewBlockVolumeMapper(
+		volumeToMount.VolumeSpec,
+		volumeToMount.Pod,
+		volumeToMount.DevicePath,
+		volume.VolumeOptions{})
+	if newMapperErr != nil {
+		eventErr, detailedErr := volumeToMount.GenerateError("MapVolume.NewBlockVolumeMapper initialization failed", newMapperErr)
+		og.recorder.Eventf(volumeToMount.Pod, v1.EventTypeWarning, kevents.FailedMapVolume, eventErr.Error())
+		return nil, detailedErr
+	}
+
+	// Get attacher, if possible
+	attachableVolumePlugin, _ :=
+		og.volumePluginMgr.FindAttachablePluginBySpec(volumeToMount.VolumeSpec)
+	var volumeAttacher volume.Attacher
+	if attachableVolumePlugin != nil {
+		volumeAttacher, _ = attachableVolumePlugin.NewAttacher()
+	}
+
+	return func() error {
+		if volumeAttacher != nil {
+			// Wait for attachable volumes to finish attaching
+			glog.Infof(volumeToMount.GenerateMsgDetailed("MapVolume.WaitForAttach entering", fmt.Sprintf("DevicePath %q", volumeToMount.DevicePath)))
+
+			devicePath, err := volumeAttacher.WaitForAttach(
+				volumeToMount.VolumeSpec, volumeToMount.DevicePath, waitForAttachTimeout)
+			if err != nil {
+				// On failure, return error. Caller will log and retry.
+				return volumeToMount.GenerateErrorDetailed("MapVolume.WaitForAttach failed", err)
+			}
+
+			glog.Infof(volumeToMount.GenerateMsgDetailed("MapVolume.WaitForAttach succeeded", ""))
+
+			// Set up for mapping device to global mount path using symbolic link
+			deviceMapPath, err :=
+				volumeAttacher.GetDeviceMountPath(volumeToMount.VolumeSpec)
+			if err != nil {
+				// On failure, return error. Caller will log and retry.
+				return volumeToMount.GenerateErrorDetailed("MapVolume.GetDeviceMountPath failed", err)
+			}
+
+			// Map device to global mount path
+			mapErr := mapDevice(devicePath, deviceMapPath)
+			if mapErr != nil {
+				// On failure, return error. Caller will log and retry.
+				eventErr, detailedErr := volumeToMount.GenerateError("MapVolume.SetUp failed", mapErr)
+				og.recorder.Eventf(volumeToMount.Pod, v1.EventTypeWarning, kevents.FailedMountVolume, eventErr.Error())
+				return detailedErr
+			}
+			// Device mapping for global mount path succeeded
+			glog.Infof(volumeToMount.GenerateMsgDetailed("MapVolume.MapDevice succeeded", fmt.Sprintf("device map path %q", deviceMapPath)))
+
+			// Update actual state of world to reflect volume is globally mounted
+			markDeviceMappedErr := actualStateOfWorld.MarkDeviceAsMounted(
+				volumeToMount.VolumeName)
+			if markDeviceMappedErr != nil {
+				// On failure, return error. Caller will log and retry.
+				return volumeToMount.GenerateErrorDetailed("MapVolume.MarkDeviceAsMounted failed", markDeviceMappedErr)
+			}
+		}
+
+		// Map volume to volume mount path using symbolic link
+		mapErr := blockVolumeMapper.SetUpDevice()
+		if mapErr != nil {
+			// On failure, return error. Caller will log and retry.
+			eventErr, detailedErr := volumeToMount.GenerateError("MapVolume.SetUp failed", mapErr)
+			og.recorder.Eventf(volumeToMount.Pod, v1.EventTypeWarning, kevents.FailedMapVolume, eventErr.Error())
+			return detailedErr
+		}
+
+		// Device mapping for volume mount path succeeded
+		simpleMsg, detailedMsg := volumeToMount.GenerateMsg("MapVolume.SetUp succeeded", "")
+		verbosity := glog.Level(1)
+		og.recorder.Eventf(volumeToMount.Pod, v1.EventTypeNormal, kevents.SuccessfulMountVolume, simpleMsg)
+		glog.V(verbosity).Infof(detailedMsg)
+
+		// Update actual state of world
+		markVolMountedErr := actualStateOfWorld.MarkVolumeAsMounted(
+			volumeToMount.PodName,
+			volumeToMount.Pod.UID,
+			volumeToMount.VolumeName,
+			nil,
+			blockVolumeMapper,
+			volumeToMount.OuterVolumeSpecName,
+			volumeToMount.VolumeGidValue)
+		if markVolMountedErr != nil {
+			// On failure, return error. Caller will log and retry.
+			return volumeToMount.GenerateErrorDetailed("MountVolume.MarkVolumeAsMounted failed", markVolMountedErr)
+		}
+
+		return nil
+	}, nil
+}
+
+func (og *operationGenerator) GenerateUnmapVolumeFunc(
+	volumeToUnmount MountedVolume,
+	actualStateOfWorld ActualStateOfWorldMounterUpdater) (func() error, error) {
+
+	var blockVolumeUnmapper volume.BlockVolumeUnmapper
+	// Get block volume unmapper plugin
+	blockVolumePlugin, err :=
+		og.volumePluginMgr.FindBlockVolumeMapperByName(volumeToUnmount.PluginName)
+	if err != nil {
+		return nil, volumeToUnmount.GenerateErrorDetailed("UnmapVolume.FindPluginBySpec failed", err)
+	}
+	if blockVolumePlugin == nil {
+		return nil, volumeToUnmount.GenerateErrorDetailed("UnmapVolume.FindPluginBySpec failed to find BlockVolumeMapper plugin. Volume plugin is nil.", nil)
+	}
+	blockVolumeUnmapper, newUnmapperErr := blockVolumePlugin.NewBlockVolumeUnmapper(
+		volumeToUnmount.InnerVolumeSpecName, volumeToUnmount.PodUID)
+	if newUnmapperErr != nil {
+		return nil, volumeToUnmount.GenerateErrorDetailed("UnmapVolume.NewUnmapper failed", newUnmapperErr)
+	}
+
+	return func() error {
+		// Execute unmap
+		unmapErr := blockVolumeUnmapper.TearDownDevice()
+		if unmapErr != nil {
+			// On failure, return error. Caller will log and retry.
+			return volumeToUnmount.GenerateErrorDetailed("UnmountVolume.TearDown failed", unmapErr)
+		}
+
+		glog.Infof(
+			"UnmountVolume.TearDown succeeded for volume %q (OuterVolumeSpecName: %q) pod %q (UID: %q). InnerVolumeSpecName %q. PluginName %q, VolumeGidValue %q",
+			volumeToUnmount.VolumeName,
+			volumeToUnmount.OuterVolumeSpecName,
+			volumeToUnmount.PodName,
+			volumeToUnmount.PodUID,
+			volumeToUnmount.InnerVolumeSpecName,
+			volumeToUnmount.PluginName,
+			volumeToUnmount.VolumeGidValue)
+
+		// Update actual state of world
+		markVolUnmountedErr := actualStateOfWorld.MarkVolumeAsUnmounted(
+			volumeToUnmount.PodName, volumeToUnmount.VolumeName)
+		if markVolUnmountedErr != nil {
+			// On failure, just log and exit
+			glog.Errorf(volumeToUnmount.GenerateErrorDetailed("UnmapVolume.MarkVolumeAsUnmounted failed", markVolUnmountedErr).Error())
+		}
+
+		return nil
+	}, nil
+}
+
+func (og *operationGenerator) GenerateUnmapDeviceFunc(
+	deviceToDetach AttachedVolume,
+	actualStateOfWorld ActualStateOfWorldMounterUpdater,
+	mounter mount.Interface) (func() error, error) {
+	// Get attacher plugin
+	attachableVolumePlugin, err :=
+		og.volumePluginMgr.FindAttachablePluginBySpec(deviceToDetach.VolumeSpec)
+	if err != nil || attachableVolumePlugin == nil {
+		return nil, deviceToDetach.GenerateErrorDetailed("UnmountDevice.FindAttachablePluginBySpec failed", err)
+	}
+
+	volumeAttacher, err := attachableVolumePlugin.NewAttacher()
+	if err != nil {
+		return nil, deviceToDetach.GenerateErrorDetailed("UnmountDevice.NewAttacher failed", err)
+	}
+
+	return func() error {
+		deviceMapPath, err :=
+			volumeAttacher.GetDeviceMountPath(deviceToDetach.VolumeSpec)
+		if err != nil {
+			// On failure, return error. Caller will log and retry.
+			return deviceToDetach.GenerateErrorDetailed("GetDeviceMountPath failed", err)
+		}
+
+		// Execute unmap
+		unmapDeviceErr := unmapDevice(deviceMapPath)
+		if unmapDeviceErr != nil {
+			// On failure, return error. Caller will log and retry.
+			return deviceToDetach.GenerateErrorDetailed("UnmapDevice failed", unmapDeviceErr)
+		}
+		glog.Infof(deviceToDetach.GenerateMsgDetailed("UnmapDevice succeeded", ""))
+
+		// Update actual state of world
+		markDeviceUnmountedErr := actualStateOfWorld.MarkDeviceAsUnmounted(
+			deviceToDetach.VolumeName)
+		if markDeviceUnmountedErr != nil {
+			// On failure, return error. Caller will log and retry.
+			return deviceToDetach.GenerateErrorDetailed("MarkDeviceAsUnmapped failed", markDeviceUnmountedErr)
+		}
+
+		return nil
+	}, nil
+}
+
 func (og *operationGenerator) GenerateVerifyControllerAttachedVolumeFunc(
 	volumeToMount VolumeToMount,
 	nodeName types.NodeName,
@@ -745,6 +976,44 @@ func checkNodeAffinity(og *operationGenerator, volumeToMount VolumeToMount, plug
 			eventErr, detailedErr := volumeToMount.GenerateError("Storage node affinity check failed", err)
 			og.recorder.Eventf(volumeToMount.Pod, v1.EventTypeWarning, kevents.FailedMountVolume, eventErr.Error())
 			return detailedErr
+		}
+	}
+	return nil
+}
+
+func mapDevice(devicePath string, deviceMapPath string) error {
+	// deviceMapPath
+	// ex. /var/lib/kubelet/plugins/kubernetes.io/<plugin>/<volume>
+	if len(devicePath) == 0 {
+		return fmt.Errorf("Failed to map device to global mount path. devicePath is empty.")
+	}
+	if len(deviceMapPath) == 0 {
+		return fmt.Errorf("Failed to map device to global mount path. deviceMapPath is empty.")
+	}
+
+	glog.Errorf("#### DEBUG LOG ####: mapDevice devicePath: %s", devicePath)
+	glog.Errorf("#### DEBUG LOG ####: mapDevice deviceMapPath; %s", deviceMapPath)
+	if err := os.Symlink(devicePath, deviceMapPath); err != nil && !os.IsExist(err) {
+		return err
+	}
+	glog.Errorf("#### DEBUG LOG ####: mapDevice: no error")
+	return nil
+}
+
+func unmapDevice(deviceMapPath string) error {
+	// deviceMapPath
+	// ex. /var/lib/kubelet/plugins/kubernetes.io/<plugin>/<volume>
+	if len(deviceMapPath) == 0 {
+		return fmt.Errorf("Failed to map device to global mount path. deviceMapPath is empty.")
+	}
+	fi, err := os.Lstat(deviceMapPath)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&os.ModeSymlink == os.ModeSymlink {
+		err := os.Remove(deviceMapPath)
+		if err != nil {
+			return err
 		}
 	}
 	return nil

@@ -38,6 +38,7 @@ import (
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/util/strings"
 	volumepkg "k8s.io/kubernetes/pkg/volume"
+	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/kubernetes/pkg/volume/util/nestedpendingoperations"
 	"k8s.io/kubernetes/pkg/volume/util/operationexecutor"
 	volumetypes "k8s.io/kubernetes/pkg/volume/util/types"
@@ -171,10 +172,22 @@ func (rc *reconciler) reconcile() {
 	// Ensure volumes that should be unmounted are unmounted.
 	for _, mountedVolume := range rc.actualStateOfWorld.GetMountedVolumes() {
 		if !rc.desiredStateOfWorld.PodExistsInVolume(mountedVolume.PodName, mountedVolume.VolumeName) {
-			// Volume is mounted, unmount it
-			glog.V(12).Infof(mountedVolume.GenerateMsgDetailed("Starting operationExecutor.UnmountVolume", ""))
-			err := rc.operationExecutor.UnmountVolume(
-				mountedVolume.MountedVolume, rc.actualStateOfWorld)
+			var err error
+			if mountedVolume.Mounter != nil {
+				// Volume is mounted, unmount it
+				glog.V(12).Infof(mountedVolume.GenerateMsgDetailed("Starting operationExecutor.UnmountVolume", ""))
+				err = rc.operationExecutor.UnmountVolume(
+					mountedVolume.MountedVolume, rc.actualStateOfWorld)
+				glog.Infof("#### DEBUG LOG ####: reconcile mountedVolume.Mounter case")
+				//glog.Infof("#### DEBUG LOG ####: reconcile mountedVolume.Mounter: %s", mountedVolume.Mounter)
+			} else if mountedVolume.BlockVolumeMapper != nil {
+				// Volume is moapped, unmap it
+				glog.V(12).Infof(mountedVolume.GenerateMsgDetailed("Starting operationExecutor.UnmapVolume", ""))
+				err = rc.operationExecutor.UnmapVolume(
+					mountedVolume.MountedVolume, rc.actualStateOfWorld)
+				glog.Infof("#### DEBUG LOG ####: reconcile mountedVolume.BlockVolumeMapper case")
+				//glog.Infof("#### DEBUG LOG ####: reconcile mountedVolume.BlockVolumeMapper: %s", mountedVolume.BlockVolumeMapper)
+			}
 			if err != nil &&
 				!nestedpendingoperations.IsAlreadyExists(err) &&
 				!exponentialbackoff.IsExponentialBackoff(err) {
@@ -239,12 +252,33 @@ func (rc *reconciler) reconcile() {
 			if isRemount {
 				remountingLogStr = "Volume is already mounted to pod, but remount was requested."
 			}
-			glog.V(12).Infof(volumeToMount.GenerateMsgDetailed("Starting operationExecutor.MountVolume", remountingLogStr))
-			err := rc.operationExecutor.MountVolume(
-				rc.waitForAttachTimeout,
-				volumeToMount.VolumeToMount,
-				rc.actualStateOfWorld,
-				isRemount)
+
+			var pvcVolumeMode v1.PersistentVolumeType
+			pv := volumeToMount.VolumeSpec.PersistentVolume
+			if pv != nil {
+				pvcVolumeMode, err = volumeutil.GetVolumeModeFromPVC(volumeToMount.Pod.ObjectMeta.Namespace, rc.kubeClient, pv)
+			}
+			if pv == nil || pvcVolumeMode != v1.PersistentVolumeBlock {
+				glog.V(12).Infof(volumeToMount.GenerateMsgDetailed("Starting operationExecutor.MountVolume", remountingLogStr))
+				err = rc.operationExecutor.MountVolume(
+					rc.waitForAttachTimeout,
+					volumeToMount.VolumeToMount,
+					rc.actualStateOfWorld,
+					isRemount)
+				glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MountVolume case")
+				glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MountVolume pv: %v", pv)
+				glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MountVolume pvcVolumeMode: %s", pvcVolumeMode)
+			} else {
+				glog.V(12).Infof(volumeToMount.GenerateMsgDetailed("Starting operationExecutor.MountVolume", remountingLogStr))
+				err = rc.operationExecutor.MapVolume(
+					rc.waitForAttachTimeout,
+					volumeToMount.VolumeToMount,
+					rc.actualStateOfWorld)
+				glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MapVolume case")
+				glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MapVolume pv: %v", pv)
+				glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MapVolume pvcVolumeMode: %s", pvcVolumeMode)
+
+			}
 			if err != nil &&
 				!nestedpendingoperations.IsAlreadyExists(err) &&
 				!exponentialbackoff.IsExponentialBackoff(err) {
@@ -345,6 +379,7 @@ type reconstructedVolume struct {
 	devicePath          string
 	reportedInUse       bool
 	mounter             volumepkg.Mounter
+	blockVolumeMapper   volumepkg.BlockVolumeMapper
 }
 
 // reconstructFromDisk scans the volume directories under the given pod directory. If the volume is not
@@ -519,6 +554,7 @@ func (rc *reconciler) updateStates(volumesNeedUpdate map[v1.UniqueVolumeName]*re
 			types.UID(volume.podName),
 			volume.volumeName,
 			volume.mounter,
+			volume.blockVolumeMapper,
 			volume.outerVolumeSpecName,
 			volume.volumeGidValue)
 		if err != nil {
