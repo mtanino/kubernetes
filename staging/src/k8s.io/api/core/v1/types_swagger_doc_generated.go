@@ -1102,6 +1102,7 @@ var map_PersistentVolumeClaimSpec = map[string]string{
 	"resources":        "Resources represents the minimum resources the volume should have. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#resources",
 	"volumeName":       "VolumeName is the binding reference to the PersistentVolume backing this claim.",
 	"storageClassName": "Name of the StorageClass required by the claim. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#class-1",
+	"volumeType":       "VolumeType defines what type of volume is required by the claim. values include Filesystem or Block and default is Filesystem if not present",
 }
 
 func (PersistentVolumeClaimSpec) SwaggerDoc() map[string]string {
@@ -1175,6 +1176,7 @@ var map_PersistentVolumeSpec = map[string]string{
 	"claimRef":                      "ClaimRef is part of a bi-directional binding between PersistentVolume and PersistentVolumeClaim. Expected to be non-nil when bound. claim.VolumeName is the authoritative bind between PV and PVC. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#binding",
 	"persistentVolumeReclaimPolicy": "What happens to a persistent volume when released from its claim. Valid options are Retain (default) and Recycle. Recycling must be supported by the volume plugin underlying this persistent volume. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#reclaiming",
 	"storageClassName":              "Name of StorageClass to which this persistent volume belongs. Empty value means that this volume does not belong to any StorageClass.",
+	"volumeType":                    "VolumeType defines if a volume is intended to be used with a formatted filesystem or to remain in raw block state.",
 }
 
 func (PersistentVolumeSpec) SwaggerDoc() map[string]string {

@@ -18686,6 +18686,10 @@
      "storageClassName": {
       "type": "string",
       "description": "Name of the StorageClass required by the claim. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#class-1"
+     },
+     "volumeType": {
+      "$ref": "v1.PersistentVolumeType",
+      "description": "VolumeType defines what type of volume is required by the claim. values include Filesystem or Block and default is Filesystem if not present"
      }
     }
    },
@@ -18748,6 +18752,10 @@
       "description": "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. More info: https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/"
      }
     }
+   },
+   "v1.PersistentVolumeType": {
+    "id": "v1.PersistentVolumeType",
+    "properties": {}
    },
    "v1.PersistentVolumeClaimStatus": {
     "id": "v1.PersistentVolumeClaimStatus",
@@ -18934,6 +18942,10 @@
      "storageClassName": {
       "type": "string",
       "description": "Name of StorageClass to which this persistent volume belongs. Empty value means that this volume does not belong to any StorageClass."
+     },
+     "volumeType": {
+      "$ref": "v1.PersistentVolumeType",
+      "description": "VolumeType defines if a volume is intended to be used with a formatted filesystem or to remain in raw block state."
      }
     }
    },

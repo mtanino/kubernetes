@@ -2097,6 +2097,11 @@ message PersistentVolumeClaimSpec {
   // More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#class-1
   // +optional
   optional string storageClassName = 5;
+
+  // VolumeType defines what type of volume is required by the claim.
+  // values include Filesystem or Block and default is Filesystem if not present
+  // +optional
+  optional string volumeType = 6;
 }
 
 // PersistentVolumeClaimStatus is the current status of a persistent volume claim.
@@ -2279,6 +2284,11 @@ message PersistentVolumeSpec {
   // means that this volume does not belong to any StorageClass.
   // +optional
   optional string storageClassName = 6;
+
+  // VolumeType defines if a volume is intended to be used with a formatted filesystem
+  // or to remain in raw block state.
+  // +optional
+  optional string volumeType = 7;
 }
 
 // PersistentVolumeStatus is the current status of a persistent volume.

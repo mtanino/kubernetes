@@ -972,6 +972,13 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <td class="tableblock halign-left valign-top"><p class="tableblock">string</p></td>
 <td class="tableblock halign-left valign-top"></td>
 </tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">volumeType</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">VolumeType defines what type of volume is required by the claim. values include Filesystem or Block and default is Filesystem if not present</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">false</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><a href="#_v1_persistentvolumetype">v1.PersistentVolumeType</a></p></td>
+<td class="tableblock halign-left valign-top"></td>
+</tr>
 </tbody>
 </table>
 
@@ -4132,6 +4139,10 @@ The StatefulSet guarantees that a given network identity will always map to the 
 </tr>
 </tbody>
 </table>
+
+</div>
+<div class="sect2">
+<h3 id="_v1_persistentvolumetype">v1.PersistentVolumeType</h3>
 
 </div>
 <div class="sect2">

@@ -6187,11 +6187,19 @@
      "storageClassName": {
       "type": "string",
       "description": "Name of the StorageClass required by the claim. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#class-1"
+     },
+     "volumeType": {
+      "$ref": "v1.PersistentVolumeType",
+      "description": "VolumeType defines what type of volume is required by the claim. values include Filesystem or Block and default is Filesystem if not present"
      }
     }
    },
    "v1.PersistentVolumeAccessMode": {
     "id": "v1.PersistentVolumeAccessMode",
+    "properties": {}
+   },
+   "v1.PersistentVolumeType": {
+    "id": "v1.PersistentVolumeType",
     "properties": {}
    },
    "v1.PersistentVolumeClaimStatus": {

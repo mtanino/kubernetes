@@ -60327,6 +60327,10 @@
      "volumeName": {
       "description": "VolumeName is the binding reference to the PersistentVolume backing this claim.",
       "type": "string"
+     },
+     "volumeType": {
+      "description": "VolumeType defines what type of volume is required by the claim. values include Filesystem or Block and default is Filesystem if not present",
+      "type": "string"
      }
     }
    },
@@ -60511,6 +60515,10 @@
      "storageos": {
       "description": "StorageOS represents a StorageOS volume that is attached to the kubelet's host machine and mounted into the pod More info: https://releases.k8s.io/HEAD/examples/volumes/storageos/README.md",
       "$ref": "#/definitions/io.k8s.api.core.v1.StorageOSPersistentVolumeSource"
+     },
+     "volumeType": {
+      "description": "VolumeType defines if a volume is intended to be used with a formatted filesystem or to remain in raw block state.",
+      "type": "string"
      },
      "vsphereVolume": {
       "description": "VsphereVolume represents a vSphere volume attached and mounted on kubelets host machine",
