@@ -322,9 +322,18 @@ func (dsw *desiredStateOfWorld) GetVolumesToMount() []VolumeToMount {
 	dsw.RLock()
 	defer dsw.RUnlock()
 
+	var volumeHandler operationexecutor.VolumeStateHandler
+	var filesystemVolumeHandler operationexecutor.FilesystemVolumeHandler
+	var blockVolumeHandler operationexecutor.BlockVolumeHandler
 	volumesToMount := make([]VolumeToMount, 0 /* len */, len(dsw.volumesToMount) /* cap */)
 	for volumeName, volumeObj := range dsw.volumesToMount {
 		for podName, podObj := range volumeObj.podsToMount {
+			volumeMode := volumehelper.GetPersistentVolumeMode(podObj.spec.PersistentVolume)
+			if volumeMode == v1.PersistentVolumeFilesystem {
+				volumeHandler = filesystemVolumeHandler
+			} else {
+				volumeHandler = blockVolumeHandler
+			}
 			volumesToMount = append(
 				volumesToMount,
 				VolumeToMount{
@@ -336,7 +345,8 @@ func (dsw *desiredStateOfWorld) GetVolumesToMount() []VolumeToMount {
 						PluginIsAttachable:  volumeObj.pluginIsAttachable,
 						OuterVolumeSpecName: podObj.outerVolumeSpecName,
 						VolumeGidValue:      volumeObj.volumeGidValue,
-						ReportedInUse:       volumeObj.reportedInUse}})
+						ReportedInUse:       volumeObj.reportedInUse,
+						VolumeHandler:       volumeHandler}})
 		}
 	}
 	return volumesToMount

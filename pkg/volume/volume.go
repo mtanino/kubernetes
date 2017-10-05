@@ -145,11 +145,6 @@ type BlockVolumeMapper interface {
 	// just return empty string for device path.
 	// This may be called more than once, so implementations must be idempotent.
 	SetUpDevice() (string, error)
-	// SetUpDeviceAt prepares the volume on a specified directory path,
-	// which may or may not exist yet and returns combination of physical
-	// device path of a block volume and error.
-	// This may be called more than once, so implementations must be idempotent.
-	SetUpDeviceAt(dir string) (string, error)
 	// GetGlobalMapPath returns a global map path which contains
 	// a symbolic links associated to a block device.
 	// ex.
@@ -170,9 +165,6 @@ type BlockVolumeUnmapper interface {
 	// If the plugin is non-attachable, this method detaches the volume
 	// from a node.
 	TearDownDevice() error
-	// TearDownDeviceAt removes traces of the SetUpDevice procedure under
-	// the specified directory.
-	TearDownDeviceAt(dir string) error
 	// GetGlobalUnmapPath returns a path to symbolic link of a
 	// block device under a global map path.
 	GetGlobalUnmapPath(spec *Spec) (string, error)

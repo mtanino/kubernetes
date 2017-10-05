@@ -680,6 +680,15 @@ func newRemountRequiredError(
 // mountedPod and attachedVolume objects.
 func getMountedVolume(
 	mountedPod *mountedPod, attachedVolume *attachedVolume) MountedVolume {
+	var volumeHandler operationexecutor.VolumeStateHandler
+	var filesystemVolumeHandler operationexecutor.FilesystemVolumeHandler
+	var blockVolumeHandler operationexecutor.BlockVolumeHandler
+	volumeMode := volumehelper.GetPersistentVolumeMode(attachedVolume.spec.PersistentVolume)
+	if volumeMode == v1.PersistentVolumeFilesystem {
+		volumeHandler = filesystemVolumeHandler
+	} else {
+		volumeHandler = blockVolumeHandler
+	}
 	return MountedVolume{
 		MountedVolume: operationexecutor.MountedVolume{
 			PodName:             mountedPod.podName,
@@ -691,5 +700,6 @@ func getMountedVolume(
 			Mounter:             mountedPod.mounter,
 			BlockVolumeMapper:   mountedPod.blockVolumeMapper,
 			VolumeGidValue:      mountedPod.volumeGidValue,
-			VolumeSpec:          attachedVolume.spec}}
+			VolumeSpec:          attachedVolume.spec,
+			VolumeHandler:       volumeHandler}}
 }

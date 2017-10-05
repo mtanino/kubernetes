@@ -29,11 +29,14 @@ import (
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/record"
 	expandcache "k8s.io/kubernetes/pkg/controller/volume/expand/cache"
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/kubernetes/pkg/volume/util/nestedpendingoperations"
+	"k8s.io/kubernetes/pkg/volume/util/operationexecutor"
 	volumetypes "k8s.io/kubernetes/pkg/volume/util/types"
 	"k8s.io/kubernetes/pkg/volume/util/volumehelper"
 )
@@ -333,6 +336,9 @@ type VolumeToMount struct {
 	// ReportedInUse indicates that the volume was successfully added to the
 	// VolumesInUse field in the node's status.
 	ReportedInUse bool
+
+	//
+	VolumeHandler VolumeStateHandler
 }
 
 // GenerateMsgDetailed returns detailed msgs for volumes to mount
@@ -385,6 +391,9 @@ type AttachedVolume struct {
 	// DevicePath contains the path on the node where the volume is attached.
 	// For non-attachable volumes this is empty.
 	DevicePath string
+
+	//
+	VolumeHandler VolumeStateHandler
 }
 
 // GenerateMsgDetailed returns detailed msgs for attached volumes
@@ -520,6 +529,9 @@ type MountedVolume struct {
 
 	//
 	BlockVolumeMapper volume.BlockVolumeMapper
+
+	//
+	VolumeHandler VolumeStateHandler
 
 	// VolumeGidValue contains the value of the GID annotation, if present.
 	VolumeGidValue string
@@ -698,6 +710,7 @@ func (oe *operationExecutor) MountVolume(
 	volumeToMount VolumeToMount,
 	actualStateOfWorld ActualStateOfWorldMounterUpdater,
 	isRemount bool) error {
+	glog.Infof("#### DEBUG LOG ####:#### DEBUG LOG ####:#### DEBUG LOG ####:#### DEBUG LOG ####: #### DEBUG LOG ####:")
 	mountFunc, plugin, err := oe.operationGenerator.GenerateMountVolumeFunc(
 		waitForAttachTimeout, volumeToMount, actualStateOfWorld, isRemount)
 	if err != nil {
@@ -850,4 +863,148 @@ func hasMountRefs(mountPath string, mountRefs []string) bool {
 		}
 	}
 	return count > 0
+}
+
+//
+type VolumeStateHandler interface {
+	//
+	HandleUnmounted(mountedVolume MountedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater) error
+	//
+	HandleAttachedMounted(aitForAttachTimeout time.Duration, volumeToMount VolumeToMount, actualStateOfWorld ActualStateOfWorldMounterUpdater, isRemount bool, remountingLogStr string) error
+	//
+	HandleDetachedUnmounted(attachedVolume AttachedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater, mounter mount.Interface) error
+}
+
+//
+func NewVolumeHandler(kubeClient clientset.Interface,
+	volumePluginMgr *volume.VolumePluginMgr,
+	recorder record.EventRecorder,
+	_ bool) VolumeStateHandler {
+
+}
+
+// NewFilesystemVolumeHandler returns a new instance of OperationExecutor.
+func NewFilesystemVolumeHandler(
+	kubeClient clientset.Interface,
+	volumePluginMgr *volume.VolumePluginMgr,
+	recorder record.EventRecorder,
+	_ bool) OperationExecutor {
+
+	operationExecutor := NewOperationExecutor(NewOperationGenerator(
+		kubeClient,
+		volumePluginMgr,
+		recorder,
+		true))
+	return operationExecutor
+}
+
+//
+func NewBlockVolumeHandler(
+	kubeClient clientset.Interface,
+	volumePluginMgr *volume.VolumePluginMgr,
+	recorder record.EventRecorder,
+	_ bool) OperationExecutor {
+
+	operationExecutor := NewOperationExecutor(NewOperationGenerator(
+		kubeClient,
+		volumePluginMgr,
+		recorder,
+		true))
+	return operationExecutor
+}
+
+//
+type FilesystemVolumeHandler struct {
+	kubeClient           clientset.Interface
+	waitForAttachTimeout time.Duration
+	actualStateOfWorld   ActualStateOfWorldMounterUpdater
+	operationExecutor    OperationExecutor
+	mounter              mount.Interface
+	volumePluginMgr      *volume.VolumePluginMgr
+	recorder             record.EventRecorder
+}
+
+//
+type BlockVolumeHandler struct {
+	kubeClient           clientset.Interface
+	waitForAttachTimeout time.Duration
+	actualStateOfWorld   ActualStateOfWorldMounterUpdater
+	operationExecutor    operationexecutor.OperationExecutor
+	mounter              mount.Interface
+	volumePluginMgr      *volumepkg.VolumePluginMgr
+	recorder             record.EventRecorder
+}
+
+//
+func (f FilesystemVolumeHandler) HandleUnmounted(mountedVolume MountedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater) error {
+	// Volume is mounted, unmount it
+	glog.V(12).Infof(mountedVolume.GenerateMsgDetailed("Starting operationExecutor.UnmountVolume", ""))
+	glog.Infof("#### DEBUG LOG ####: reconcile mountedVolume.Mounter case")
+	glog.Infof("#### DEBUG LOG ####: reconcile mountedVolume.Mounter mountedVolume: %v", mountedVolume)
+	err := f.oe.UnmountVolume(
+		mountedVolume,
+		actualStateOfWorld)
+	return err
+}
+
+//
+func (f FilesystemVolumeHandler) HandleAttachedMounted(waitForAttachTimeout time.Duration, volumeToMount VolumeToMount, actualStateOfWorld ActualStateOfWorldMounterUpdater, isRemount bool, remountingLogStr string) error {
+	glog.V(12).Infof(volumeToMount.GenerateMsgDetailed("Starting operationExecutor.MountVolume", remountingLogStr))
+	glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MountVolume volumeToMount: %s", volumeToMount)
+	glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MountVolume waitForAttachTimeout: %v", waitForAttachTimeout)
+	glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MountVolume actualStateOfWorld: %v", actualStateOfWorld)
+	glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MountVolume isRemount: %v", isRemount)
+	err := f.oe.MountVolume(
+		waitForAttachTimeout,
+		volumeToMount,
+		actualStateOfWorld,
+		isRemount)
+	glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MountVolume case")
+	return err
+}
+
+//
+func (f FilesystemVolumeHandler) HandleDetachedUnmounted(attachedVolume AttachedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater, mounter mount.Interface) error {
+	// Volume is globally mounted to device, unmount it
+	glog.V(12).Infof(attachedVolume.GenerateMsgDetailed("Starting operationExecutor.UnmountDevice", ""))
+	glog.Infof("#### DEBUG LOG ####: attachedVolume UnmountDevice case: %v\n", attachedVolume.VolumeName)
+	err := f.oe.UnmountDevice(
+		attachedVolume,
+		actualStateOfWorld,
+		mounter)
+	return err
+}
+
+//
+func (b BlockVolumeHandler) HandleUnmounted(mountedVolume MountedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater) error {
+	// Volume is mapped, unmap it
+	glog.V(12).Infof(mountedVolume.GenerateMsgDetailed("Starting operationExecutor.UnmapVolume", ""))
+	err := b.oe.UnmapVolume(
+		mountedVolume,
+		actualStateOfWorld)
+	glog.Infof("#### DEBUG LOG ####: reconcile mountedVolume.BlockVolumeMapper case")
+	return err
+}
+
+//
+func (b BlockVolumeHandler) HandleAttachedMounted(waitForAttachTimeout time.Duration, volumeToMount VolumeToMount, actualStateOfWorld ActualStateOfWorldMounterUpdater, _ bool, _ string) error {
+	glog.V(12).Infof(volumeToMount.GenerateMsgDetailed("Starting operationExecutor.MapVolume", ""))
+	err := b.oe.MapVolume(
+		waitForAttachTimeout,
+		volumeToMount,
+		actualStateOfWorld)
+	glog.Infof("#### DEBUG LOG ####: reconcile attached/mounted, MapVolume case")
+	return err
+}
+
+//
+func (b BlockVolumeHandler) HandleDetachedUnmounted(attachedVolume AttachedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater, mounter mount.Interface) error {
+	// Volume is globally mapped to device, unmap it
+	glog.V(12).Infof(attachedVolume.GenerateMsgDetailed("Starting operationExecutor.UnmapDevice", ""))
+	glog.Infof("#### DEBUG LOG ####: attachedVolume Block UnmapDevice case: %v\n", attachedVolume.VolumeName)
+	err := b.oe.UnmapDevice(
+		attachedVolume,
+		actualStateOfWorld,
+		mounter)
+	return err
 }

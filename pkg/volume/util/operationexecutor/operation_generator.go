@@ -1012,8 +1012,8 @@ func (og *operationGenerator) verifyVolumeIsSafeToDetach(
 func (og *operationGenerator) GenerateExpandVolumeFunc(
 	pvcWithResizeRequest *expandcache.PVCWithResizeRequest,
 	resizeMap expandcache.VolumeResizeMap) (func() error, string, error) {
-
-	volumeSpec := volume.NewSpecFromPersistentVolume(pvcWithResizeRequest.PersistentVolume, false)
+	pv := pvcWithResizeRequest.PersistentVolume
+	volumeSpec := volume.NewSpecFromPersistentVolume(pv, false)
 
 	volumePlugin, err := og.volumePluginMgr.FindExpandablePluginBySpec(volumeSpec)
 
